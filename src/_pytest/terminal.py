@@ -8,6 +8,7 @@ import datetime
 import inspect
 import platform
 import sys
+import textwrap
 import warnings
 from collections import Counter
 from functools import partial
@@ -72,6 +73,7 @@ KNOWN_TYPES = (
 )
 
 _REPORTCHARS_DEFAULT = "fE"
+_DEFAULT_PROGRESS_MARGIN_SIZE = 7
 
 
 class MoreQuietAction(argparse.Action):
@@ -317,6 +319,22 @@ class WarningReport:
         return None
 
 
+def _pad_wrap_message(
+    msg: str,
+    width: int,
+    margin: int = _DEFAULT_PROGRESS_MARGIN_SIZE,
+    line_sep: str = "",
+):
+    """Wrap and pad message with margin for progress info."""
+    if not msg.strip():
+        return msg
+    wrapped = textwrap.wrap(msg, width - margin, drop_whitespace=True) or [""]
+    out_lines = [line.ljust(width) for line in wrapped[:-1]]
+    out_lines.append(wrapped[-1].ljust(width - margin))
+    msg_out = line_sep.join(out_lines)
+    return msg_out
+
+
 @final
 class TerminalReporter:
     def __init__(self, config: Config, file: Optional[TextIO] = None) -> None:
@@ -408,26 +426,29 @@ class TerminalReporter:
                 self._write_progress_information_filling_space()
             self.currentfspath = fspath
             relfspath = bestrelpath(self.startpath, fspath)
-            self._tw.line()
-            self._tw.write(relfspath + " ")
-        self._tw.write(res, flush=True, **markup)
+            self.line_with_margin()
+            self.write_with_margin(relfspath + " ")
+        self.write_with_margin(res, flush=True, **markup)
 
     def write_ensure_prefix(self, prefix: str, extra: str = "", **kwargs) -> None:
         if self.currentfspath != prefix:
-            self._tw.line()
+            self.line_with_margin()
             self.currentfspath = prefix
-            self._tw.write(prefix)
+            self.write_with_margin(prefix)
         if extra:
-            self._tw.write(extra, **kwargs)
+            self.write_with_margin(extra, **kwargs)
             self.currentfspath = -2
 
     def ensure_newline(self) -> None:
         if self.currentfspath:
-            self._tw.line()
+            self.line()
             self.currentfspath = None
 
-    def write(self, content: str, *, flush: bool = False, **markup: bool) -> None:
-        self._tw.write(content, flush=flush, **markup)
+    def write(self, msg: str, *, margin: int = 0, flush: bool = False, **markup: bool) -> None:
+        self._tw.write(msg, margin=margin, flush=flush, **markup)
+
+    def write_with_margin(self, msg: str, *, margin: int = 0, flush: bool = False, **markup: bool) -> None:
+        self._tw.write(msg, margin=margin, flush=flush, **markup)
 
     def flush(self) -> None:
         self._tw.flush()
@@ -436,7 +457,7 @@ class TerminalReporter:
         if not isinstance(line, str):
             line = str(line, errors="replace")
         self.ensure_newline()
-        self._tw.line(line, **markup)
+        self.line(line, **markup)
 
     def rewrite(self, line: str, **markup: bool) -> None:
         """Rewinds the terminal cursor to the beginning and writes the given line.
@@ -454,7 +475,7 @@ class TerminalReporter:
         else:
             fill = ""
         line = str(line)
-        self._tw.write("\r" + line + fill, **markup)
+        self.write("\r" + line + fill, **markup)
 
     def write_sep(
         self,
@@ -464,13 +485,39 @@ class TerminalReporter:
         **markup: bool,
     ) -> None:
         self.ensure_newline()
-        self._tw.sep(sep, title, fullwidth, **markup)
+        self.sep(sep, title, fullwidth, **markup)
 
     def section(self, title: str, sep: str = "=", **kw: bool) -> None:
-        self._tw.sep(sep, title, **kw)
+        self.sep(sep, title, **kw)
 
-    def line(self, msg: str, **kw: bool) -> None:
-        self._tw.line(msg, **kw)
+    def line(self, msg: str = "", margin: int = 0, **kw: bool) -> None:
+        self.write(msg, margin=margin, **kw)
+        self.write("\n")
+
+    def line_with_margin(self, msg: str = "", margin: int = 0, **kw: bool) -> None:
+        self.write_with_margin(msg + "\n", margin=margin, **kw)
+
+    @property
+    def fullwidth(self) -> int:
+        return self._tw.fullwidth
+
+    def sep(
+        self,
+        sepchar: str,
+        title: Optional[str] = None,
+        fullwidth: Optional[int] = None,
+        **markup: bool,
+    ) -> None:
+        # all writes should go through local methods
+        # call TerminalWriter.sep directly to avoid duplciating logic
+        # self only needs a `line` method and `fullwidth` property
+        type(self._tw).sep(
+            self,  # type: ignore[arg-type]
+            sepchar,
+            title,
+            fullwidth,
+            **markup,
+        )
 
     def _add_stats(self, category: str, items: Sequence[Any]) -> None:
         set_main_color = category not in self.stats
@@ -551,7 +598,7 @@ class TerminalReporter:
             else:
                 markup = {}
         if self.verbosity <= 0:
-            self._tw.write(letter, **markup)
+            self.write(letter, **markup)
         else:
             self._progress_nodeids_reported.add(rep.nodeid)
             line = self._locationline(rep.nodeid, *rep.location)
@@ -572,20 +619,20 @@ class TerminalReporter:
                         formatted_reason = f" ({reason})"
 
                     if reason and formatted_reason is not None:
-                        self._tw.write(formatted_reason)
+                        self.write(formatted_reason)
                 if self._show_progress_info:
                     self._write_progress_information_filling_space()
             else:
                 self.ensure_newline()
-                self._tw.write("[%s]" % rep.node.gateway.id)
+                self.write("[%s]" % rep.node.gateway.id)
                 if self._show_progress_info:
-                    self._tw.write(
+                    self.write(
                         self._get_progress_information_message() + " ", cyan=True
                     )
                 else:
-                    self._tw.write(" ")
-                self._tw.write(word, **markup)
-                self._tw.write(" " + line)
+                    self.write(" ")
+                self.write(word, **markup)
+                self.write(" " + line)
                 self.currentfspath = -2
         self.flush()
 
@@ -613,7 +660,7 @@ class TerminalReporter:
                 past_edge = w + progress_length + 1 >= self._screen_width
                 if past_edge:
                     msg = self._get_progress_information_message()
-                    self._tw.write(msg + "\n", **{main_color: True})
+                    self.write(msg + "\n", **{main_color: True})
 
     def _get_progress_information_message(self) -> str:
         assert self._session
@@ -766,12 +813,12 @@ class TerminalReporter:
         if self.config.getoption("collectonly"):
             if session.items:
                 if self.config.option.verbose > -1:
-                    self._tw.line("")
+                    self.line("")
                 self._printcollecteditems(session.items)
 
             failed = self.stats.get("failed")
             if failed:
-                self._tw.sep("!", "collection failures")
+                self.sep("!", "collection failures")
                 for rep in failed:
                     rep.toterminal(self._tw)
 
@@ -780,10 +827,10 @@ class TerminalReporter:
             if self.config.option.verbose < -1:
                 counts = Counter(item.nodeid.split("::", 1)[0] for item in items)
                 for name, count in sorted(counts.items()):
-                    self._tw.line("%s: %d" % (name, count))
+                    self.line("%s: %d" % (name, count))
             else:
                 for item in items:
-                    self._tw.line(item.nodeid)
+                    self.line(item.nodeid)
             return
         stack: List[Node] = []
         indent = ""
@@ -796,13 +843,13 @@ class TerminalReporter:
             for col in needed_collectors[len(stack) :]:
                 stack.append(col)
                 indent = (len(stack) - 1) * "  "
-                self._tw.line(f"{indent}{col}")
+                self.line(f"{indent}{col}")
                 if self.config.option.verbose >= 1:
                     obj = getattr(col, "obj", None)
                     doc = inspect.getdoc(obj) if obj else None
                     if doc:
                         for line in doc.splitlines():
-                            self._tw.line("{}{}".format(indent + "  ", line))
+                            self.line("{}{}".format(indent + "  ", line))
 
     @hookimpl(hookwrapper=True)
     def pytest_sessionfinish(
@@ -810,7 +857,7 @@ class TerminalReporter:
     ):
         outcome = yield
         outcome.get_result()
-        self._tw.line("")
+        self.line("")
         summary_exit_codes = (
             ExitCode.OK,
             ExitCode.TESTS_FAILED,
@@ -860,7 +907,7 @@ class TerminalReporter:
                 excrepr.toterminal(self._tw)
             else:
                 excrepr.reprcrash.toterminal(self._tw)
-                self._tw.line(
+                self.line(
                     "(to show a full traceback on KeyboardInterrupt use --full-trace)",
                     yellow=True,
                 )
@@ -951,15 +998,15 @@ class TerminalReporter:
             for message, message_reports in reports_grouped_by_message.items():
                 maybe_location = collapsed_location_report(message_reports)
                 if maybe_location:
-                    self._tw.line(maybe_location)
+                    self.line(maybe_location)
                     lines = message.splitlines()
                     indented = "\n".join("  " + x for x in lines)
                     message = indented.rstrip()
                 else:
                     message = message.rstrip()
-                self._tw.line(message)
-                self._tw.line()
-            self._tw.line(
+                self.line(message)
+                self.line()
+            self.line(
                 "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html"
             )
 
@@ -997,10 +1044,10 @@ class TerminalReporter:
             if showcapture != "all" and showcapture not in secname:
                 continue
             if "teardown" in secname:
-                self._tw.sep("-", secname)
+                self.sep("-", secname)
                 if content[-1:] == "\n":
                     content = content[:-1]
-                self._tw.line(content)
+                self.line(content)
 
     def summary_failures(self) -> None:
         if self.config.option.tbstyle != "no":
@@ -1042,10 +1089,10 @@ class TerminalReporter:
         for secname, content in rep.sections:
             if showcapture != "all" and showcapture not in secname:
                 continue
-            self._tw.sep("-", secname)
+            self.sep("-", secname)
             if content[-1:] == "\n":
                 content = content[:-1]
-            self._tw.line(content)
+            self.line(content)
 
     def summary_stats(self) -> None:
         if self.verbosity < -1:

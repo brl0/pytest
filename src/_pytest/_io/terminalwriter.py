@@ -2,6 +2,7 @@
 import os
 import shutil
 import sys
+import textwrap
 from typing import Optional
 from typing import Sequence
 from typing import TextIO
@@ -141,15 +142,36 @@ class TerminalWriter:
 
         self.line(line, **markup)
 
-    def write(self, msg: str, *, flush: bool = False, **markup: bool) -> None:
+    def write(self, msg: str, *, margin: int = 0, flush: bool = False, **markup: bool) -> None:
         if msg:
-            current_line = msg.rsplit("\n", 1)[-1]
-            if "\n" in msg:
-                self._current_line = current_line
+            lines = msg.split("\n")
+            fullwidth = self.fullwidth
+            w = fullwidth - margin
+            _current_line = self._current_line
+            line_count = len(lines)
+            if line_count > 1:
+                if margin and (len(_current_line) + len(lines[0]) > w or any(len(_) > w for _ in lines[1:])):
+                    lines = textwrap.wrap(_current_line + msg, w, drop_whitespace=True)
+                new_lines = []
+                for i, line in enumerate(lines):
+                    if i == 0:
+                        idx = len(_current_line)
+                        line = line[idx:]
+                        new = self.markup(line, **markup)
+                        if margin:
+                            new += " " * (w - (len(line) + idx))
+                    elif i == line_count - 1:
+                        self._current_line = line
+                        new = self.markup(line, **markup)
+                    else:
+                        new = self.markup(line, **markup)
+                        if margin:
+                            new += " " * (w - len(line))
+                    new_lines.append(new)
+                msg = "\n".join(new_lines)
             else:
-                self._current_line += current_line
-
-            msg = self.markup(msg, **markup)
+                self._current_line += msg
+                msg = self.markup(msg, **markup)
 
             try:
                 self._file.write(msg)
