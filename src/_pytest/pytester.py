@@ -770,7 +770,7 @@ class Pytester:
     ) -> Path:
         items = list(files.items())
 
-        if ext and not ext.startswith("."):
+        if ext and "." not in ext:
             raise ValueError(
                 f"pytester.makefile expects a file extension, try .{ext} instead of {ext}"
             )
@@ -785,7 +785,7 @@ class Pytester:
 
         ret = None
         for basename, value in items:
-            p = self.path.joinpath(basename).with_suffix(ext)
+            p = self.path.joinpath(basename + ext)
             p.parent.mkdir(parents=True, exist_ok=True)
             source_ = Source(value)
             source = "\n".join(to_text(line) for line in source_.lines)

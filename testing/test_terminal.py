@@ -2610,3 +2610,21 @@ def test_format_trimmed() -> None:
 
     assert _format_trimmed(" ({}) ", msg, len(msg) + 4) == " (unconditional skip) "
     assert _format_trimmed(" ({}) ", msg, len(msg) + 3) == " (unconditional ...) "
+
+
+class TestLongNames:
+    @staticmethod
+    def test_long_test_name(pytester: Pytester) -> None:
+        name = "test_long_test_name" + "_" * 200
+        pytester.makepyfile(f"def {name}(): pass")
+        result = pytester.runpytest("-v")
+        result.stdout.fnmatch_lines([f"test_long_test_name.py::{name} PASSED*"])
+
+    @staticmethod
+    def test_long_test_file_name(pytester: Pytester) -> None:
+        ext = "_" * 200 + ".py"
+        pytester.makefile(ext, "def test_foo(): pass")
+        result = pytester.runpytest("-v")
+        result.stdout.fnmatch_lines(
+            [f"test_long_test_file_name{ext}::test_foo PASSED*"]
+        )
